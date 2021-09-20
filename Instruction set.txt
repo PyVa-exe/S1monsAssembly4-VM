@@ -1,0 +1,50 @@
+set attr - set attr into Reg
+
+add none - Acc = Acc + Reg
+sub none - Acc = Acc - Reg
+shg none - Acc = Acc shifted greater
+shs none - Acc = Acc shifted smaller
+
+lor none - Acc = Acc (logical or) Reg
+and none - Acc = Acc (logical and) Reg
+xor none - Acc = Acc (logical xor) Reg
+not none - Acc = Acc (logical not)
+
+lDA attr - Load mem at attr into Acc
+lDR attr - Load mem at attr into Reg
+sAD attr - Save Acc into mem at attr
+sRD attr - Save Reg into mem at attr
+
+lPA atrr - Load mem pointed to by mem at attr into Acc
+lPR atrr - Load mem pointed to by mem at attr into Reg
+sAP atrr - Save Acc into mem pointed to by mem at attr
+sRP atrr - Save Reg into mem pointed to by mem at attr
+
+out attr - outputs mem at attr
+inp attr - inputs  mem at attr
+
+lab attr - define lable
+got attr - goto attr
+jm0 attr - goto attr if Acc = 0
+jmA attr - goto attr if Acc = Reg
+
+jmG attr - goto attr if Acc > Reg (jmG for jump great)
+jmL attr - goto atrr if Acc < Reg (jmL for jump less)
+
+jmS attr - goto attr as subroutine (pc gets push to stack)
+ret none - return from subroutine (stack gets pop to pc)
+
+pha none - push Acc to stack
+pla none - pull from stack to Acc
+
+
+brk none - stops programm
+clr none - clears Reg and Acc
+
+
+putstr none - print the Acc as ascii
+
+ahm none - allocate a number of word given by the Reg and put a pointer to the base into the Acc
+fhm none - free a number of word given by the Reg at the address given by the Acc
+
+plugin attr - runs plugin with name of attr
