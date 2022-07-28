@@ -62,6 +62,7 @@ plugin attr - runs plugin with name of attr
 
 import time
 import glob
+import argparse
 
 class cInt:
     def __init__(self, xInt = 0, xIntLimit = 65535):
@@ -90,7 +91,12 @@ class cLine:
         
     def __str__(self):
         return "{: <10}{}".format(str(self.xInst), str(self.xAttr))
- 
+
+
+class cPluginEnv:
+    xDebug = False
+
+
 class cMain:
     def __init__(self):
         self.xFile = ""
@@ -120,9 +126,9 @@ class cMain:
 
         #assign a pointer to the memory and stack to the plugin env
         #this work because when you copy a list in python, it will just copy a pointer to that list, which can also be modified
-        self.xPluginEnv = {}
-        self.xPluginEnv['mem']   = self.xMem
-        self.xPluginEnv['stack'] = self.xStack
+        self.xPluginEnv = cPluginEnv()
+        self.xPluginEnv.xMem   = self.xMem
+        self.xPluginEnv.xStack = self.xStack
                 
                                                 
 
@@ -165,11 +171,7 @@ class cMain:
                 
                 xInst = xLine.xInst
                 xAttr = xLine.xAttr
-                
-                
-                if xPrintAll:
-                    print("{xCycleIndex: <10}{xInst: <10}:{xAttr}".format(xInst = xInst, xAttr = xAttr, xCycleIndex = self.xTotalIndex))
-                                
+                                                                                     
                 #execute inst
                 if xInst == "set":
                     self.xReg.Set(int(xAttr))
@@ -238,7 +240,7 @@ class cMain:
     
                 
                 elif xInst == "out":
-                    print(int(self.xMem[int(xAttr)]), file = xStdOut)
+                    print(int(self.xMem[int(xAttr)]), end = "" if self.xNoNL else "\n")
                 
                 elif xInst == "inp":
                     xInput = input(">>>")
@@ -294,9 +296,9 @@ class cMain:
                 elif xInst == "pla":
                     if len(self.xStack) != 0:
                         self.xAcc.Set(int(self.xStack.pop()))
-                
+                                
                 elif xInst == "putstr":
-                    print(chr(int(self.xAcc)), end = "", flush = True, file = xStdOut)
+                    print(chr(int(self.xAcc)), end = "", flush = True)
                     
                 elif xInst == "ahm":
                     xAllocSize = int(self.xReg)
@@ -359,45 +361,32 @@ class cMain:
                 self.xProgrammIndex += 1
                 self.xTotalIndex += 1
 
+
         except KeyboardInterrupt:
             pass
+
+        except KeyError:
+            print("Error: label not found\n    {}".format(str(cM.xLineStructures[cM.xProgramIndex])))
         
         #print("Program took " + str(self.xTotalIndex) + " Cycles to complete")
-                        
         
 if __name__ == '__main__':
-    import sys, os
-    xArgv = sys.argv
-    xPath = None
+    xArgParser = argparse.ArgumentParser(description = "S1monsAssembly4 Virtual Machine v2 (with external debugging)")    
+
+    xArgParser.add_argument("--file", type=str, dest="path", action="store", nargs=1, required=True, help = "Assembler file to run")
+    xArgParser.add_argument("--PluginPath", type=str, dest="PluginPath", action="store", nargs=1,    help = "Path to plugin files")
+    xArgParser.add_argument("--NoNL", dest="NoNL", action="store_true",                    help = "'out' instruction will not put newline")
+    xArgs = xArgParser.parse_args()
     
-    if "--help" in xArgv:
-        print("""
---help            display help
---file            input file
---stdout          redirect stdout
---PrintAll        print all executed instructions
---PluginPath      path to plugin file
-        """)
-        exit()
-    
-    
+
     try:
-        xPath = xArgv[xArgv.index("--file") + 1]
+        xPath = xArgs.path[0]
         xFile = open(xPath, "r").read()
         
-    except Exception:
+    except Exception as E:
         print("Error while loading file")
-        exit()
+        sys.exit(0)
 
-
-        
-    xStdOut = sys.stdout
-    try:
-        xStdOutPath = xArgv[xArgv.index("--stdout") + 1]
-        xStdOut = open(xStdOutPath, "w")
-
-        print("Writing to file with path: " + str(xStdOutPath))        
-    except Exception: pass
 
 
 
@@ -405,9 +394,9 @@ if __name__ == '__main__':
     xPGlobals = {}
 
 
-    if "--PluginPath" in xArgv:
+    if xArgs.PluginPath:
         try:            
-            xPluginPath = xArgv[xArgv.index("--PluginPath") + 1]
+            xPluginPath = xArgs.PluginPath[0]
             xPluginPaths = glob.glob(xPluginPath + "\\*.py")
             
             for xPathIter in xPluginPaths:
@@ -416,7 +405,7 @@ if __name__ == '__main__':
                 xFileHandleIter.close()
                 
                 xPluginName = xPathIter.split("\\")[-1].split(".")[0]
-                
+
                 exec(xFileHandle, globals(), locals())
 
     
@@ -426,13 +415,7 @@ if __name__ == '__main__':
             print(E)
     
     
-    xPrintAll = "--PrintAll" in xArgv
-        
     cM = cMain()
-    cM.xFile = xFile    
-    
-    try:
-        cM.Interpret()
-                
-    except KeyError:
-        print("Error: label not found\n    {}".format(str(cM.xLineStructures[cM.xProgrammIndex])))
+    cM.xFile = xFile
+    cM.xNoNL = xArgs.NoNL
+    cM.Interpret()
