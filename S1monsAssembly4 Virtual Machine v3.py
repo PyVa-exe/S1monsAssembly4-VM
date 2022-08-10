@@ -63,6 +63,13 @@ plugin attr - runs plugin with name of attr
 import time
 import glob
 import argparse
+import traceback
+import json
+import sys
+
+cls         = lambda: print("\033[2J\033[H")
+pprintDict  = lambda s: "\n".join([f"{x: <25}\t : {s[x]}".format() for x in s])
+
 
 class cInt:
     def __init__(self, xInt = 0, xIntLimit = 65535):
@@ -99,7 +106,13 @@ class cPluginEnv:
 
 class cMain:
     def __init__(self):
-        self.xFile = ""
+        self.xFile          = ""
+        
+        self.xConfig = {
+                "NoNL"          : False,
+                "DisplayTime"   : False,
+                "PrintCommand"  : False,           
+            }
         
         self.xBitSize = 16
         self.xIntLimit = 2 ** self.xBitSize 
@@ -120,7 +133,7 @@ class cMain:
         self.xStack = []
                 
         self.xProgrammIndex = 0
-        self.xLables = {}
+        self.xLabels = {}
         
         self.xTotalIndex = 0
 
@@ -130,12 +143,16 @@ class cMain:
         self.xPluginEnv.xMem   = self.xMem
         self.xPluginEnv.xStack = self.xStack
                 
-                                                
+    def Reset(self):                                    
+        self.xReg = cInt(0, self.xIntLimit)
+        self.xAcc = cInt(0, self.xIntLimit)
+        self.xHeapAlloc = []         
+        self.xMem = [cInt(0, self.xIntLimit) for i in range(self.xIntLimit)]        
+        self.xStack = []
 
 
     
-    def Structuring(self, xRawSource):
-        #this function will take in the raw source and make it into a structure
+    def LoadFile(self, xRawSource):
         xLineStructureBuffer = []
         xLineIndex = 0
         xLineOffset = 0
@@ -145,29 +162,206 @@ class cMain:
             
             if xInst == "lab":
                 if not xAttr is None:
-                    self.xLables[xAttr] = str(xLineIndex - xLineOffset)
+                    self.xLabels[xAttr] = str(xLineIndex - xLineOffset)
                     xLineOffset += 1
                 
                 else:
-                    raise _Error("Attribute Error: " + " ".join(xLineIterator))
-                
+                    print("Attribute Error: " + " ".join(xLineIterator))
+                    sys.exit(0)
                 
             else:
                 xLineStructureBuffer.append(cLine(xInst = xInst, xAttr = xAttr))
         
             xLineIndex += 1
         
-        return xLineStructureBuffer
+        self.xLineStructures = xLineStructureBuffer
+
+
+
+    def RunTest(self, xFilePath):
+        with open(xFilePath, "r") as xFile:
+            xUnitTest = json.load(xFile)
+            
+        if "tests" not in xUnitTest:
+            print('"tests" key not found in test file, aborting')
+            return
         
-    def Interpret(self):
-        self.xLineStructures = self.Structuring(self.xFile)
+        xTests    = xUnitTest["tests"]
+        xLog      = ""
+        xFailed   = []
+        
+        
+        def Log(xMsg):
+            nonlocal xLog
+            xLog += xMsg + "\n"
+
+        def Send(xMsg):
+            Log(xMsg)
+            print(xMsg)
+        
+        
+        for xTest in xTests:
+            Log("-----")
+            
+            if "entryCall" not in xTest or "outputStack" not in xTest:
+                Send("skipping invalid test: " + str(xTest))
+                continue
+
+            xEntryCall = xTest["entryCall"]
+            xExpectedStack = xTest["outputStack"]
+            if xEntryCall not in self.xLabels:
+                Send("skipping invalid entry call: {}".format(xEntryCall))
+                continue
+            
+            if   "resetVM"     in xTest and xTest["resetVM"] == "True":           
+                self.Reset()
+                Log("\tresetting VM")
+            if "runBeforeCall" in xTest and xTest["runBeforeCall"] == "True":     
+                self.Interpret()
+                Log("\trunning before call")            
+            if "inputStack"    in xTest:
+                self.xStack = list(xTest["inputStack"])
+                Log("\tsetting stack {}".format(self.xStack))
+            
+            Log(f"calling {xEntryCall} with stack {self.xStack}".format())    
+            self.xStack.append((len(self.xLineStructures) + 1) * 2)  #inject return address to jump to end of program
+            self.Interpret(int(self.xLabels[xEntryCall]))
+            xActualStack = self.xStack
+
+            if xExpectedStack == xActualStack:
+                Log("test passed")
+            
+            else:
+                Log(f"test failed, expected {xExpectedStack} but got {xActualStack}".format())
+                xFailed.append(xEntryCall)
+        
+        Send("\n" * 5)
+
+        if len(xFailed) > 0:
+            Send("failed:")
+            Send("\n".join(xFailed))
+            Send("")
+            Send(f"{len(xTests)}/{len(xFailed)} failed".format())
+        else:
+            Send("all tests passed")
+        
+        Send("")
+        
+        if "log" in xUnitTest:
+            with open(xUnitTest["log"], "w") as xFile:
+                xFile.write(xLog)
+        
+
+    def Interact(self):        
+        cls()
+        print("-- S1monsAssembly4 v3 VM Interactive --\n")
+        
+        HELPTEXT = """
+exit                - exit vm
+help                - display help
+clear               - clear screen
+run                 - execute loaded program
+run <label>         - execute subroutine @<label>
+set                 - list settings
+set <name> <value>  - set setting <name> to <value>
+
+push <value>        - push <value> to the stack
+pop                 - pop value of the stack and print it
+memory <address> <value> - set memory @<address> to <value> 
+reset               - reset vm
+
+stack               - print stack
+memory <a1>:<a2>    - print memory location from @<a1> to @<a2>
+allocs              - print allocated memory addresses
+labels              - print label to address mapper
+
+test <filePath>     - run test file @<filePath> with load file
+
+test file format:
+{
+    "tests" :
+    [
+        {"runBeforeCall" : Bool, "resetVM" : Bool, "inputStack" : List::Int, "entryCall" : String, "outputStack" : List::Int},
+        ...
+    ],
+    "log" : String
+}
+
+
+        """
                 
+        
+        while True:
+            try:
+                xRaw = input(">>>").split(" ")
+                xInj    = [x.strip() for x in xRaw]
+                xInjLen = len(xInj)
+                
+                if xInjLen < 1: continue
+                xOperation = xInj[0].lower()
+
+                #metas    
+                if   xOperation == "exit":                                                  break
+                elif xOperation == "help":                                                  print(HELPTEXT) 
+                elif xOperation == "clear":                                                 cls()
+                elif xOperation == "run" and xInjLen == 1:                                  self.Interpret()
+                elif xOperation == "run" and xInjLen == 2 and xInj[1] in self.xLabels:
+                    self.xStack.append((len(self.xLineStructures) + 1) * 2) #inject return address to jump to end of program
+                    self.Interpret(xEntryAddress = int(self.xLabels[xInj[1]]))                
+                
+                elif xOperation == "set" and xInjLen > 2:
+                    (xSetting, xNewState) = xInj[1:3]
+                    if xSetting in self.xConfig:
+                        self.xConfig[xSetting] = bool(xNewState)
+                        print(f"new state for '{xSetting}' is {xNewState}".format())        
+            
+                    else:
+                        print(f"unrecognized setting '{xSetting}'".format())
+
+                elif xOperation == "set" and xInjLen < 2:           print(pprintDict(self.xConfig))
+            
+                #sets
+                elif xOperation == "push" and xInjLen > 1:          self.xStack.append(int(xInj[1]))
+                elif xOperation == "pop"  and len(self.xStack) > 0: print(self.xStack.pop())
+                elif xOperation == "memory" and xInjLen == 3:       self.xMem[int(xInj[1])].Set(int(xInj[2]))
+                elif xOperation == "reset":                         self.Reset()
+            
+                #gets
+                elif xOperation == "stack":                         print('V ' + ' \n| '.join(map(str, self.xStack[::-1])))
+                elif xOperation == "memory" and xInjLen == 2 and ":" in xInj[1]:
+                    x = list(map(int, xInj[1].split(":")))
+                    print(list(map(int, self.xMem[x[0]:x[1]])))
+                elif xOperation == "allocs":                        print(self.xHeapAlloc)
+                elif xOperation == "labels":                        print(pprintDict(self.xLabels))
+                
+                elif xOperation == "test" and xInjLen > 1:
+                    self.RunTest(xInj[1])
+                
+                else:
+                    print(f"unrecognized injection {xInj}".format())
+            
+                print()
+            
+            except KeyboardInterrupt:
+                print("KeyboardInterrupt\n")
+                continue
+        
+            except Exception:
+                print(traceback.format_exc())
+    
+    
+    def Interpret(self, xEntryAddress = 0):
+        self.xProgrammIndex = xEntryAddress
+        self.xTotalIndex = 0
+        
         try:
+            xStartTime = time.time()
             while self.xProgrammIndex < len(self.xLineStructures):
                                 
                 
                 
                 xLine = self.xLineStructures[self.xProgrammIndex]
+                if self.xConfig["PrintCommand"]: print(xLine)
                 
                 xInst = xLine.xInst
                 xAttr = xLine.xAttr
@@ -240,35 +434,35 @@ class cMain:
     
                 
                 elif xInst == "out":
-                    print(int(self.xMem[int(xAttr)]), end = "" if self.xNoNL else "\n")
+                    print(int(self.xMem[int(xAttr)]), end = "" if self.xConfig["NoNL"] else "\n")
                 
                 elif xInst == "inp":
                     xInput = input(">>>")
                     self.xMem[int(xAttr)].Set(0 if xInput == "" else int(xInput))
                 
                 elif xInst == "got":
-                    self.xProgrammIndex = int(self.xLables[str(xAttr)])
+                    self.xProgrammIndex = int(self.xLabels[str(xAttr)])
                     continue
                 
                 elif xInst == "jm0":
                     if int(self.xAcc) == 0:
-                        self.xProgrammIndex = int(self.xLables[str(xAttr)])
+                        self.xProgrammIndex = int(self.xLabels[str(xAttr)])
                         continue
                     
                     
                 elif xInst == "jmA":
                     if int(self.xAcc) == int(self.xReg):
-                        self.xProgrammIndex = int(self.xLables[str(xAttr)])
+                        self.xProgrammIndex = int(self.xLabels[str(xAttr)])
                         continue
                   
                 elif xInst == "jmG":
                     if int(self.xAcc) > int(self.xReg):
-                        self.xProgrammIndex = int(self.xLables[str(xAttr)])
+                        self.xProgrammIndex = int(self.xLabels[str(xAttr)])
                         continue
                 
                 elif xInst == "jmL":
                     if int(self.xAcc) < int(self.xReg):
-                        self.xProgrammIndex = int(self.xLables[str(xAttr)])
+                        self.xProgrammIndex = int(self.xLabels[str(xAttr)])
                         continue
     
                         
@@ -281,7 +475,7 @@ class cMain:
                 
                 elif xInst == "jmS":
                     self.xStack.append((self.xProgrammIndex + 1) * 2)
-                    self.xProgrammIndex = int(self.xLables[str(xAttr)])
+                    self.xProgrammIndex = int(self.xLabels[str(xAttr)])
                     continue
                     
                     
@@ -366,16 +560,19 @@ class cMain:
             pass
 
         except KeyError:
-            print("Error: label not found\n    {}".format(str(cM.xLineStructures[cM.xProgramIndex])))
+            print("Error: label not found\n    {}".format(str(self.xLineStructures[self.xProgrammIndex])))
         
-        #print("Program took " + str(self.xTotalIndex) + " Cycles to complete")
+        if self.xConfig["DisplayTime"]: print(f"Execution took {str(self.xTotalIndex)} cycles and {time.time() - xStartTime} seconds")
         
 if __name__ == '__main__':
     xArgParser = argparse.ArgumentParser(description = "S1monsAssembly4 Virtual Machine v2 (with external debugging)")    
 
-    xArgParser.add_argument("--file", type=str, dest="path", action="store", nargs=1, required=True, help = "Assembler file to run")
-    xArgParser.add_argument("--PluginPath", type=str, dest="PluginPath", action="store", nargs=1,    help = "Path to plugin files")
-    xArgParser.add_argument("--NoNL", dest="NoNL", action="store_true",                    help = "'out' instruction will not put newline")
+    xArgParser.add_argument("-f", "--file", type=str, dest="path", action="store", nargs=1, required=True, help = "Assembler file to run")
+    xArgParser.add_argument("-p", "--PluginPath", type=str, dest="PluginPath", action="store", nargs=1,    help = "Path to plugin files")
+    xArgParser.add_argument("-l", "--NoNL", dest="NoNL", action="store_true", help = "'out' instruction will not put newline")
+    xArgParser.add_argument("-i", "--interactive", dest="I", action="store_true", help = "run vm in interactive mode")
+    xArgParser.add_argument("-t", "--Time", dest="Time", action="store_true", help = "display execution time")
+    xArgParser.add_argument("-c", "--PrintCommand", dest="PrintCommand", action="store_true", help = "print the command being currently executed")
     xArgs = xArgParser.parse_args()
     
 
@@ -416,6 +613,12 @@ if __name__ == '__main__':
     
     
     cM = cMain()
-    cM.xFile = xFile
-    cM.xNoNL = xArgs.NoNL
-    cM.Interpret()
+    cM.LoadFile(xFile)
+    
+    cM.xConfig = {
+            "NoNL"          : xArgs.NoNL,
+            "DisplayTime"   : xArgs.Time,
+            "PrintCommand"  : xArgs.PrintCommand,
+        }
+    
+    cM.Interact() if xArgs.I else cM.Interpret()
