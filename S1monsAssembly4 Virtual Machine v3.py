@@ -573,6 +573,7 @@ if __name__ == '__main__':
     xArgParser.add_argument("-i", "--interactive", dest="I", action="store_true", help = "run vm in interactive mode")
     xArgParser.add_argument("-t", "--Time", dest="Time", action="store_true", help = "display execution time")
     xArgParser.add_argument("-c", "--PrintCommand", dest="PrintCommand", action="store_true", help = "print the command being currently executed")
+    xArgParser.add_argument("-a", "--AuxFile", dest="AuxFile", action="store", nargs=1, help = "file@address, loades file into system memory at address")
     xArgs = xArgParser.parse_args()
     
 
@@ -620,5 +621,31 @@ if __name__ == '__main__':
             "DisplayTime"   : xArgs.Time,
             "PrintCommand"  : xArgs.PrintCommand,
         }
+    
+    #load aux file
+    if xArgs.AuxFile:
+        try:
+            (xAuxFilePath, xAuxAddr) = xArgs.AuxFile[0].split("@")
+
+            with open(xAuxFilePath, "r") as xFileHandle:
+                xFile = xFileHandle.read()
+
+            xSpace = 65535 - int(xAuxAddr)
+            if xSpace < len(xFile):
+                print("Not enough space to load AuxFile")
+
+            else:
+                xAddrIndex = int(xAuxAddr)
+                for xCharIter in xFile:
+                    xCode = ord(xCharIter)
+                    cM.xMem[xAddrIndex].Set(xCode)
+                    xAddrIndex += 1
+
+                #terminator
+                cM.xMem[xAddrIndex].Set(0)
+
+        except Exception as E:
+            print("Error while loading AuxFile:")
+            print(E)
     
     cM.Interact() if xArgs.I else cM.Interpret()
